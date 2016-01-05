@@ -8,7 +8,8 @@ This directory can then be put on a cloud storage provider and synchornized to a
 
 Command-line usage help:
 
-```$ python updatetree.py --help
+```
+$ python updatetree.py --help
 usage: updatetree.py [-h] [--db [FILE]] [--latency L] [--debug] [--test] dest
 
 Update directory tree of Zotero attachments.
@@ -25,3 +26,7 @@ optional arguments:
   --test       Don't modify file system, only do simulated test run
 ```
 
+Example usage:
+```
+python updatetree.py --debug ~/Dropbox/ZoteroPDFs/
+```
