@@ -1,3 +1,6 @@
+from tendo import singleton
+me = singleton.SingleInstance()
+
 import os, tempfile, shutil, sys, time
 import numpy as np
 import pandas as pd
