@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger()
 sep = os.path.sep
 
-
+# Function to convert string into a safe filename
 import unicodedata, re, string
 validFilenameChars = "-_.() %s%s" % (string.ascii_letters, string.digits)
 validRE = re.compile("[^%s]" % validFilenameChars)
@@ -14,15 +14,17 @@ def scrubfilename(filename):
   cleanedFilename = unicodedata.normalize('NFKD', unicode(filename)).encode('ASCII', 'ignore')
   return validRE.sub(' ', cleanedFilename).strip()
 
-
+# ************************************************
+# Define and read in command-line arguments
+# ************************************************
 import argparse
-def commandline_arg(bytestring):
+def commandline_arg(bytestring):  # Parse unicode
   unicode_string = bytestring.decode(sys.getfilesystemencoding())
   return unicode_string
-parser = argparse.ArgumentParser(description='Update tree of Zotero attachments.')
+parser = argparse.ArgumentParser(description='Update directory tree of Zotero attachments.')
 parser.add_argument('dest', type=commandline_arg, help='Ouptut location')
-parser.add_argument('--db', type=commandline_arg, metavar='SQLITE_FILE', nargs='?', help='Location of zotero.sqlite file (automatically determined if not specified)')
-parser.add_argument('--latency', help='Polling interval in seconds', type=int, default=10)
+parser.add_argument('--db', type=commandline_arg, metavar='FILE', nargs='?', help='Location of zotero.sqlite file (automatically determined if not specified)')
+parser.add_argument('--latency', metavar='L', help='Polling interval in seconds', type=int, default=10)
 parser.add_argument('--debug', help='Output debugging information', action='store_true')
 parser.add_argument('--test', help='Don\'t modify file system, only do simulated test run',  action='store_true')
 args = parser.parse_args()
@@ -30,6 +32,9 @@ args = parser.parse_args()
 if args.debug or args.test:
   logger.setLevel(logging.DEBUG)
 
+# ************************************************
+# Find Zotero database file
+# ************************************************
 if args.db is None:
   try:
     import getpass
@@ -78,12 +83,17 @@ except:
 
 tempdb = tmppath + 'zotero.sqlite'
 
-
+# ************************************************
+# Determine output directory
+# ************************************************
 OUTPUTDIR = os.path.expanduser(args.dest)
 logger.debug("Saving to destination folder: %s", OUTPUTDIR)
 
 last_modtime = 0
 
+# ************************************************
+# Begin polling loop
+# ************************************************
 while True:
 
   msg = None
@@ -92,7 +102,7 @@ while True:
       msg = 'Database modification detected'
 
   cur_modtime = os.stat(dbfile).st_mtime
-  if cur_modtime == last_modtime:
+  if cur_modtime == last_modtime:  # Has database been modified?
     continue
 
   if msg is not None:
@@ -100,8 +110,10 @@ while True:
 
   last_modtime = cur_modtime
 
+  # ************************************************
+  # Create copy of database and connect to it
+  # ************************************************
   shutil.copyfile(dbfile, tempdb)
-
   try:
     import sqlite3
     db = sqlite3.connect(tempdb)
@@ -111,7 +123,7 @@ while True:
     sys.exit()
 
   try:
-    # Initial item names
+    # Pull out Zotero item names 
     sql = """
     select items.itemID,
       creatorData.firstName as authorfirst, 
@@ -148,8 +160,10 @@ while True:
     itemNamesDF['fname'] = itemNamesDF['fname'] + itemNamesDF.publishedDate.apply(lambda x: " - " + x if x is not None else "")
     itemNamesDF['incollection'] = False
 
+    # ******************************************************
+    # Use collections database to create directory structure
+    # ******************************************************
 
-    # Get folders
     foldlist = []
     def get_collection_tree(df, basefold, parentCollectionId = np.nan):
         global foldlist
@@ -166,11 +180,13 @@ while True:
     get_collection_tree(df, [])
 
 
-    # Create list of symlinks
+    # ******************************************************
+    # Create list of symbolic links to attachments
+    # ******************************************************
     namedict = itemNamesDF.fname.to_dict()
 
     df = pd.read_sql("""
-                    select collectionItems.itemID, collectionID 
+                     select collectionItems.itemID, collectionID 
                      from collectionItems
                      INNER JOIN items ON collectionItems.itemID = items.itemID
                      WHERE items.itemTypeID != 1 AND items.itemTypeID != 14
@@ -288,6 +304,10 @@ while True:
         else:
           if not args.test:
             os.symlink(src, clnk)
+
+    # ******************************************************
+    # Close database and delete temporary file
+    # ******************************************************
     db.close()
     os.remove(tempdb)
 
