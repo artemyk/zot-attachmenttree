@@ -252,7 +252,11 @@ while True:
 
     for l in alldirlinks:
       logger.debug("%s: Removing symbolic link to directory", l)
-      if not args.test: os.remove(l)
+      if not args.test: 
+        try:
+          os.remove(l)
+        except:  # Don't crash
+          logger.exception("EXCEPTION: Could not remove symbolic link to directory %s", l)
 
     for _, foldname in foldlist + [(None,['Unfiled',]),]:
       cdir = OUTPUTDIR + sep.join(foldname)
@@ -268,7 +272,15 @@ while True:
     for lnk, src in symlinks:
       clnk = OUTPUTDIR + lnk
       if clnk in allfiles:
-        if (src is None and not os.path.islink(clnk)) or (src is not None and os.readlink(clnk) == src):
+        linktarget = None
+        try:
+          islink = os.path.islink(clnk)
+          if src is not None and islink:
+            linktarget = os.readlink(clnk)
+        except:
+          logger.exception("EXCEPTION: Could not run islink/readlink previously-listed file %s", clnk)
+
+        if (src is None and not islink) or (src is not None and islink and linktarget == src):
           allfiles[clnk] = False # don't delete
 
     logdone=False
@@ -278,7 +290,12 @@ while True:
           logger.debug("***DELETING FILES***")
           logdone = True
         logger.debug(f)
-        if not args.test: os.remove(f)
+        if not args.test: 
+          try:
+            os.remove(f)
+          except:
+            # Just in case file has already been moved / deleted by another process, don't crash
+            logger.exception("EXCEPTION: Could not delete file %s", f)
             
     logdone=False
     for d, to_del in alldirs.iteritems():
@@ -287,7 +304,12 @@ while True:
           logger.debug("***DELETING DIRS***")
           logdone = True
         logger.debug(d)
-        if not args.test: shutil.rmtree(d)
+        if not args.test: 
+          try:
+            shutil.rmtree(d)
+          except:
+            # Just in case directory has already been moved / deleted by another process, don't crash
+            logger.exception("EXCEPTION: Could not delete directory %s", d)
             
     logdone=False
     for lnk, src in symlinks:
@@ -306,7 +328,11 @@ while True:
                 f.write("")
         else:
           if not args.test:
-            os.symlink(src, clnk)
+            try:
+              os.symlink(src, clnk)
+            except:
+              # If for whatever reason we fail, don't crash
+              logger.exception("EXCEPTION: Could not create symbolic link %s -> %s", clnk, src)
 
     # ******************************************************
     # Close database and delete temporary file
@@ -315,7 +341,7 @@ while True:
     os.remove(tempdb)
 
   except:
-    logging.exception("Exception occured")
+    logging.exception("EXCEPTION!")
     try:
       db.close()
     except:
