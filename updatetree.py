@@ -17,6 +17,78 @@ def scrubfilename(filename):
   cleanedFilename = unicodedata.normalize('NFKD', unicode(filename)).encode('ASCII', 'ignore')
   return validRE.sub(' ', cleanedFilename).strip()
 
+# Function to get dataframe with item names
+def get_itemnames_df(db):
+  sql = """
+  select items.itemID,
+    creatorData.firstName as authorfirst, 
+    creatorData.lastName as authorlast, 
+    SUBSTR(dateDV.value,1,4) as publishedDate,
+    titleDV.value as title,
+    pubDV.value as journal
+    
+  from items
+    left join (
+         select itemID, min(orderIndex) as minOrderIndex from itemCreators group by itemID
+      ) AS firstCreatorIndex ON firstCreatorIndex.itemID = items.itemID 
+    left join itemCreators on itemCreators.itemID=items.itemID and itemCreators.orderIndex=firstCreatorIndex.minOrderIndex
+    left join creators     on creators.creatorID=itemCreators.creatorID 
+    left join creatorData  on creatorData.creatorDataID=creators.creatorDataID      
+    
+    left join itemData dateD         on (dateD.itemID=items.itemID and dateD.fieldID=14) 
+    left join itemDataValues dateDV  on dateDV.valueID=dateD.valueID
+    left join itemData titleD         on (titleD.itemID=items.itemID and titleD.fieldID=110) 
+    left join itemDataValues titleDV  on titleDV.valueID=titleD.valueID
+    left join itemData pubD         on (pubD.itemID=items.itemID and pubD.fieldID=12) 
+    left join itemDataValues pubDV  on pubDV.valueID=pubD.valueID
+    
+  where items.itemTypeID != 1 and items.itemTypeID != 14 -- don't want attachments or notes
+  """
+  itemNamesDF=pd.read_sql(sql, db, index_col='itemID')
+
+  itemNamesDF['fname'] = \
+      itemNamesDF.authorfirst.apply(lambda x: "".join(map(lambda y: y[0] if len(y) else "", x.split(" "))) + " " if x is not None else "") + \
+      itemNamesDF.authorlast.apply(lambda x: x.strip() if x is not None else "")
+  itemNamesDF['fname'] = itemNamesDF.fname.apply(lambda x: x + ' - ' if x != "" else '')
+  itemNamesDF['fname'] = itemNamesDF['fname'] + itemNamesDF.title.apply(lambda x: x[0:70] if x is not None and x != "" else "NOTITLE")
+  itemNamesDF['fname'] = itemNamesDF['fname'] + itemNamesDF.journal.apply(lambda x: " - " + x if x is not None else "")
+  itemNamesDF['fname'] = itemNamesDF['fname'] + itemNamesDF.publishedDate.apply(lambda x: " - " + x if x is not None else "")
+  return itemNamesDF
+
+def get_profile_dir():
+  import getpass
+  import platform
+  home = os.path.expanduser("~")
+  if platform.system() == 'Darwin':
+    basepaths = [home+u'/Library/Application Support/Firefox/',home+u'/Library/Application Support/Zotero/']
+  elif platform.system() == 'Windows':
+    raise Exception("Windows not supported due to symlinks")
+    #if map(int, platform.version().split("."))[0] >= 6:
+    #    basepaths = [home+u'\\AppData\\Roaming\\Mozilla\\Firefox\\', 
+    #                 home+u'\\AppData\\Roaming\\Zotero\\Zotero\\']
+    #else:
+    #    user = getpass.getuser()
+    #    basepaths = [u'C:\\Documents and Settings\\%s\\Application Data\\Mozilla\\Firefox\\'%user,
+    #                 u'C:\\Documents and Settings\\%s\\Application Data\\Zotero\\'%user]
+  else:
+    basepaths = [home+'/.mozilla/firefox/',home+'/.zotero/']
+
+  if os.path.exists(basepaths[0]) and os.path.exists(basepaths[1]):
+    raise Exception('Both standalone and firefox version exists -- not sure which to choose')
+
+  profiledir = None    
+  for bp in basepaths:
+    cdir = bp + 'Profiles' + sep
+    if os.path.exists(cdir):
+      for f2 in (f for f in os.listdir(cdir) if not f.startswith('.')):
+        if profiledir is None:
+          profiledir = cdir + f2 + os.path.sep + 'zotero' + os.path.sep
+        else:
+          raise Exception('Duplicate profiles found')
+
+  return profiledir
+
+
 # ************************************************
 # Define and read in command-line arguments
 # ************************************************
@@ -30,6 +102,7 @@ parser.add_argument('--db', type=commandline_arg, metavar='FILE', nargs='?', hel
 parser.add_argument('--latency', metavar='L', help='Polling interval in seconds', type=int, default=10)
 parser.add_argument('--debug', help='Output debugging information', action='store_true')
 parser.add_argument('--test', help='Don\'t modify file system, only do simulated test run',  action='store_true')
+parser.add_argument('--nodaemon', help='Run once and exit.', action='store_true')
 args = parser.parse_args()
 
 if args.debug or args.test:
@@ -40,43 +113,16 @@ if args.debug or args.test:
 # ************************************************
 if args.db is None:
   try:
-    import getpass
-    import platform
-    home = os.path.expanduser("~")
-    if platform.system() == 'Darwin':
-      basepaths = [home+u'/Library/Application Support/Firefox/',home+u'/Library/Application Support/Zotero/']
-    elif platform.system() == 'Windows':
-      raise Exception("Windows not supported due to symlinks")
-      #if map(int, platform.version().split("."))[0] >= 6:
-      #    basepaths = [home+u'\\AppData\\Roaming\\Mozilla\\Firefox\\', 
-      #                 home+u'\\AppData\\Roaming\\Zotero\\Zotero\\']
-      #else:
-      #    user = getpass.getuser()
-      #    basepaths = [u'C:\\Documents and Settings\\%s\\Application Data\\Mozilla\\Firefox\\'%user,
-      #                 u'C:\\Documents and Settings\\%s\\Application Data\\Zotero\\'%user]
-    else:
-      basepaths = [home+'/.mozilla/firefox/',home+'/.zotero/']
-
-    if os.path.exists(basepaths[0]) and os.path.exists(basepaths[1]):
-      raise Exception('Both standalone and firefox version exists -- not sure which to choose')
-
-    profiledir = None    
-    for bp in basepaths:
-      cdir = bp + 'Profiles' + sep
-      if os.path.exists(cdir):
-        for f2 in (f for f in os.listdir(cdir) if not f.startswith('.')):
-          if profiledir is None:
-            profiledir = cdir + f2 + os.path.sep + 'zotero' + os.path.sep
-          else:
-            raise Exception('Duplicate profiles found')
+    profiledir = get_profile_dir()
     dbfile = profiledir + 'zotero.sqlite'
-    logging.debug('Zotero DB found at: %s' % dbfile)
+    logging.debug(u'Zotero DB found at: %s', dbfile)
   except:
     logging.exception("Error finding Zotero profile directory")
     sys.exit()
 else:
   dbfile = args.db
-  logger.exception("Zotero DB specified at %s" % dbfile)
+  profiledir = os.path.dirname(dbfile) + sep
+  logging.debug(u"Zotero DB specified at %s", dbfile)
 
 try:
   tmppath = tempfile.mkdtemp()
@@ -90,7 +136,7 @@ tempdb = tmppath + 'zotero.sqlite'
 # Determine output directory
 # ************************************************
 OUTPUTDIR = os.path.expanduser(args.dest)
-logger.debug("Saving to destination folder: %s", OUTPUTDIR)
+logging.debug("Saving to destination folder: %s", OUTPUTDIR)
 
 last_modtime = 0
 
@@ -99,18 +145,22 @@ last_modtime = 0
 # ************************************************
 while True:
 
-  msg = None
   if last_modtime != 0:  # dont sleep the first time around
       time.sleep(args.latency)
-      msg = 'Database modification detected'
 
-  cur_modtime = os.stat(dbfile).st_mtime
+  try:
+    cur_modtime = os.stat(dbfile).st_mtime
+  except:
+    raise Exception("Could not find database file %s" % dbfile)
   if cur_modtime == last_modtime:  # Has database been modified?
     continue
 
-  if msg is not None:
-    logger.debug(msg)
+  if last_modtime == 0:
+    logging.debug("Running startup sync")
+  else:
+    logging.debug("Database modification detected")
 
+  start_time = time.time()
   last_modtime = cur_modtime
 
   # ************************************************
@@ -127,50 +177,19 @@ while True:
 
   try:
     # Pull out Zotero item names 
-    sql = """
-    select items.itemID,
-      creatorData.firstName as authorfirst, 
-      creatorData.lastName as authorlast, 
-      SUBSTR(dateDV.value,1,4) as publishedDate,
-      titleDV.value as title,
-      pubDV.value as journal
-      
-    from items
-      left join (
-           select itemID, min(orderIndex) as minOrderIndex from itemCreators group by itemID
-        ) AS firstCreatorIndex ON firstCreatorIndex.itemID = items.itemID 
-      left join itemCreators on itemCreators.itemID=items.itemID and itemCreators.orderIndex=firstCreatorIndex.minOrderIndex
-      left join creators     on creators.creatorID=itemCreators.creatorID 
-      left join creatorData  on creatorData.creatorDataID=creators.creatorDataID      
-      
-      left join itemData dateD         on (dateD.itemID=items.itemID and dateD.fieldID=14) 
-      left join itemDataValues dateDV  on dateDV.valueID=dateD.valueID
-      left join itemData titleD         on (titleD.itemID=items.itemID and titleD.fieldID=110) 
-      left join itemDataValues titleDV  on titleDV.valueID=titleD.valueID
-      left join itemData pubD         on (pubD.itemID=items.itemID and pubD.fieldID=12) 
-      left join itemDataValues pubDV  on pubDV.valueID=pubD.valueID
-      
-    where items.itemTypeID != 1 and items.itemTypeID != 14 -- don't want attachments or notes
-    """
-    itemNamesDF=pd.read_sql(sql, db, index_col='itemID')
-
-    itemNamesDF['fname'] = \
-        itemNamesDF.authorfirst.apply(lambda x: "".join(map(lambda y: y[0] if len(y) else "", x.split(" "))) + " " if x is not None else "") + \
-        itemNamesDF.authorlast.apply(lambda x: x.strip() if x is not None else "")
-    itemNamesDF['fname'] = itemNamesDF.fname.apply(lambda x: x + ' - ' if x != "" else '')
-    itemNamesDF['fname'] = itemNamesDF['fname'] + itemNamesDF.title.apply(lambda x: x[0:70] if x is not None and x != "" else "NOTITLE")
-    itemNamesDF['fname'] = itemNamesDF['fname'] + itemNamesDF.journal.apply(lambda x: " - " + x if x is not None else "")
-    itemNamesDF['fname'] = itemNamesDF['fname'] + itemNamesDF.publishedDate.apply(lambda x: " - " + x if x is not None else "")
+    itemNamesDF = get_itemnames_df(db)
     itemNamesDF['incollection'] = False
 
     # ******************************************************
     # Use collections database to create directory structure
     # ******************************************************
 
+
     foldlist = []
     def get_collection_tree(df, basefold, parentCollectionId = np.nan):
         global foldlist
-        if not np.isnan( parentCollectionId ): foldlist.append((parentCollectionId,basefold))
+        if not np.isnan( parentCollectionId ): 
+          foldlist.append((parentCollectionId,basefold))
         try:
             cdf = df.ix[parentCollectionId]
             for cid, cname in zip(cdf.collectionID, cdf.collectionName):
@@ -212,127 +231,87 @@ while True:
         
     dfhashkey = pd.read_sql("select itemID, key from items", db, index_col="itemID").key.to_dict()
 
-    symlinks = []
-
+    trg_structure = [(OUTPUTDIR,'DIR'),]
     def addsymlinks(foldname, itemslist):
-      global symlinks
+      global trg_structure
+      trg_structure.append((OUTPUTDIR+sep.join(foldname), "DIR"))
       for sourceItemID in itemslist:
         fname = scrubfilename(namedict[sourceItemID])
         attlist = itemAtts[sourceItemID]
         l = len(attlist)
         if l == 0:
-          symlinks.append((sep.join(foldname + [fname + ' NOPDF',]), None))
+          sname = sep.join(foldname + [fname + ' NOPDF',])
+          trg_structure.append((OUTPUTDIR+sname, 'FILE'))
         else:
           for ndx, cItemID in enumerate(attlist):
-            cfname = fname + (' (%d)' % (ndx+1) if l > 1 else '') + '.pdf'
-            symlinks.append((sep.join(foldname + [cfname,]), 
-                             profiledir + 'storage' + sep + dfhashkey[cItemID] + sep + attpath[cItemID]))
+            sname = sep.join(foldname + [fname + (' (%d)' % (ndx+1) if l > 1 else '') + '.pdf',])
+            lnktarget = profiledir + 'storage' + sep + dfhashkey[cItemID] + sep + attpath[cItemID]
+            trg_structure.append((OUTPUTDIR+sname, 'LINK', lnktarget))
             
     for collId, foldname in foldlist:
       try:
         items = df.loc[collId]
+        itemlist = [items.itemID,] if len(items) == 1 else items.itemID.tolist()
       except:  # Folder without documents
-        continue
-      addsymlinks(foldname, [items.itemID,] if len(items) == 1 else items.itemID.tolist())
+        itemlist = []
+      addsymlinks(foldname, itemlist)
 
     addsymlinks(['Unfiled',], itemNamesDF[itemNamesDF.incollection==False].index.values)
 
     # ****************************
     # Update destination directory
     # ****************************
-
-    alldirs, allfiles, alldirlinks = {}, {}, []
+    islink = os.path.islink
+    readlink = os.readlink
+    existing_structure = []
     for root, dirs, files in os.walk(OUTPUTDIR):
-      alldirs[root] = True
+      existing_structure.append((root,'DIR'))
       for f in files:
-        allfiles[root+sep+f] = True
+        fullpath = root+sep+f
+        if islink(fullpath):
+          existing_structure.append((fullpath,'LINK', readlink(fullpath)))
+        else:
+          existing_structure.append((fullpath,'FILE'))
+
       for f in os.listdir(root):
         if not f.startswith('.') and os.path.isdir(root+sep+f) and os.path.islink(root+sep+f):
-          alldirlinks.append(root+sep+f)
+          existing_structure.append((root+sep+f,'DIRLINK'))
 
-    for l in alldirlinks:
-      logger.debug(u"%s: Removing symbolic link to directory", l)
-      if not args.test: 
-        try:
-          os.remove(l)
-        except:  # Don't crash
-          logger.exception(u"EXCEPTION: Could not remove symbolic link to directory %s", l)
-
-    for _, foldname in foldlist + [(None,['Unfiled',]),]:
-      cdir = OUTPUTDIR + sep.join(foldname)
-      if cdir in alldirs:
-        alldirs[cdir]=False # do not delete
+    trg_structure_set = set(trg_structure)
+    existing_structure_set = set(existing_structure)
+    
+    def objname(o):
+      if o[1] == 'LINK':
+        return 'LINK ' + o[0] + " (" + o[2] + ")"
       else:
-        logger.debug(u"%s: Creating directories" % cdir)
-        if not args.test: os.makedirs(cdir)
+        return o[1] + ' ' + o[0]
 
-    if OUTPUTDIR in alldirs:
-      del alldirs[OUTPUTDIR]
+    for f in existing_structure[::-1]: 
+      # iterate backward so that deeper down directories are deleted first
+      if f not in trg_structure_set:
+        logging.debug(u"Deleting %s", objname(f))
+        if not args.test:
+          if f[1] == 'DIR':
+            shutil.rmtree(f[0])
+          else:
+            os.remove(f[0])
 
-    for lnk, src in symlinks:
-      clnk = OUTPUTDIR + lnk
-      if clnk in allfiles:
-        linktarget = None
-        try:
-          islink = os.path.islink(clnk)
-          if src is not None and islink:
-            linktarget = os.readlink(clnk)
-        except:
-          logger.exception(u"EXCEPTION: Could not run islink/readlink previously-listed file %s", clnk)
-
-        if (src is None and not islink) or (src is not None and islink and linktarget == src):
-          allfiles[clnk] = False # don't delete
-
-    logdone=False
-    for f, to_del in allfiles.iteritems():
-      if to_del:
-        if not logdone:
-          logger.debug(u"***DELETING FILES***")
-          logdone = True
-        logger.debug(f)
-        if not args.test: 
+    for f in trg_structure:
+      if f not in existing_structure_set:
+        logging.debug(u"Making %s", objname(f))
+        if not args.test:
           try:
-            os.remove(f)
+            if f[1] == 'DIR':
+              os.makedirs(f[0])
+            elif f[1] == 'FILE':
+              with open(f[0], "w") as fhandle:
+                  fhandle.write("")
+            elif f[1] == 'LINK':
+              os.symlink(f[2], f[0])
+            else:
+              raise Exception(u"Don''t know how to create this type!")
           except:
-            # Just in case file has already been moved / deleted by another process, don't crash
-            logger.exception(u"EXCEPTION: Could not delete file %s", f)
-            
-    logdone=False
-    for d, to_del in alldirs.iteritems():
-      if to_del:
-        if not logdone:
-          logger.debug(u"***DELETING DIRS***")
-          logdone = True
-        logger.debug(d)
-        if not args.test: 
-          try:
-            shutil.rmtree(d)
-          except:
-            # Just in case directory has already been moved / deleted by another process, don't crash
-            logger.exception(u"EXCEPTION: Could not delete directory %s", d)
-            
-    logdone=False
-    for lnk, src in symlinks:
-      clnk = OUTPUTDIR + lnk
-      if allfiles.get(clnk, True):
-        if not logdone:
-          logger.debug(u"***INSERTING LINKS***")
-          logdone = True
-        logger.debug(u"%s -> %s", clnk, src if src is not None else '[NONE]')
-        if os.path.lexists(clnk):
-          logger.debug(u"  (already exists, skipping!)")
-          continue
-        if src is None:
-          if not args.test:
-            with open(clnk, "w") as f:
-                f.write("")
-        else:
-          if not args.test:
-            try:
-              os.symlink(src, clnk)
-            except:
-              # If for whatever reason we fail, don't crash
-              logger.exception(u"EXCEPTION: Could not create symbolic link %s -> %s", clnk, src)
+            logging.exception("EXCEPTION: Creation failed")
 
     # ******************************************************
     # Close database and delete temporary file
@@ -348,8 +327,12 @@ while True:
       pass
     sys.exit()
 
+  logging.debug("Executed in %0.3fs", time.time() - start_time)
 
-logger.debug("Removing temporary directory")
+  if args.nodaemon:
+    break
+
+logging.debug("Removing temporary directory")
 try:
   shutil.rmtree(tmppath)
 except:
