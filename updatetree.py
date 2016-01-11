@@ -325,7 +325,10 @@ while True:
       db.close()
     except:
       pass
-    sys.exit()
+    try:
+      os.remove(tempdb)
+    except:
+      pass
 
   logging.debug("Executed in %0.3fs", time.time() - start_time)
 
