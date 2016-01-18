@@ -41,8 +41,11 @@ def get_itemnames_df(db):
     left join itemDataValues titleDV  on titleDV.valueID=titleD.valueID
     left join itemData pubD         on (pubD.itemID=items.itemID and pubD.fieldID=12) 
     left join itemDataValues pubDV  on pubDV.valueID=pubD.valueID
+    left join deletedItems deleted on items.itemID = deleted.itemID
     
-  where items.itemTypeID != 1 and items.itemTypeID != 14 -- don't want attachments or notes
+  where 
+  deleted.itemID IS NULL AND 
+  items.itemTypeID != 1 and items.itemTypeID != 14 -- don't want attachments or notes
   """
   itemNamesDF=pd.read_sql(sql, db, index_col='itemID')
 
@@ -97,7 +100,7 @@ def commandline_arg(bytestring):  # Parse unicode
   unicode_string = bytestring.decode(sys.getfilesystemencoding())
   return unicode_string
 parser = argparse.ArgumentParser(description='Update directory tree of Zotero attachments.')
-parser.add_argument('dest', type=commandline_arg, help='Ouptut location')
+parser.add_argument('dest', type=commandline_arg, help='Output location')
 parser.add_argument('--db', type=commandline_arg, metavar='FILE', nargs='?', help='Location of zotero.sqlite file (automatically determined if not specified)')
 parser.add_argument('--latency', metavar='L', help='Polling interval in seconds', type=int, default=10)
 parser.add_argument('--debug', help='Output debugging information', action='store_true')
@@ -186,14 +189,24 @@ while True:
 
 
     foldlist = []
+    existing_folder_names = set()
     def get_collection_tree(df, basefold, parentCollectionId = np.nan):
-        global foldlist
+        global foldlist, existing_folder_names
         if not np.isnan( parentCollectionId ): 
           foldlist.append((parentCollectionId,basefold))
         try:
             cdf = df.ix[parentCollectionId]
             for cid, cname in zip(cdf.collectionID, cdf.collectionName):
-                cfold = basefold[:] + [scrubfilename(cname),]
+                ndx = 1
+                basedir = sep.join(basefold[:]) + sep
+                while True:
+                  cfoldname = scrubfilename(cname) + ("" if ndx == 1 else " (%d)" % ndx)
+                  if basedir + cfoldname not in existing_folder_names:
+                    existing_folder_names.add(basedir + cfoldname)
+                    break
+                  ndx +=1
+
+                cfold = basefold[:] + [cfoldname,]
                 get_collection_tree(df, cfold, cid)
         except:
             #no children
@@ -211,16 +224,23 @@ while True:
                      select collectionItems.itemID, collectionID 
                      from collectionItems
                      INNER JOIN items ON collectionItems.itemID = items.itemID
-                     WHERE items.itemTypeID != 1 AND items.itemTypeID != 14
+                     left join deletedItems deleted on items.itemID = deleted.itemID
+                     where deleted.itemID IS NULL AND items.itemTypeID != 1 AND items.itemTypeID != 14
                      """, db, index_col='collectionID')
     df['itemID'] = df['itemID'].astype('int')
     itemNamesDF.loc[df.itemID, 'incollection'] = True
 
     dfatt = pd.read_sql("""
-                        select sourceItemID, itemID, path from itemAttachments 
-                        where mimeType='application/pdf' and path like 'storage:%'
-                        and sourceItemId is not null
-                        order by itemID
+                        select sourceItemID, itemAttachments.itemID, path 
+                        from itemAttachments 
+                        left join deletedItems deleted on itemAttachments.itemID = deleted.itemID
+                        left join deletedItems deleted2 on itemAttachments.sourceItemID = deleted2.itemID
+                        where 
+                          deleted.itemID IS NULL AND 
+                          mimeType='application/pdf' and 
+                          path like 'storage:%' and
+                          sourceItemId is not null
+                        order by itemAttachments.itemID
                         """, 
                         db)
     itemAtts = defaultdict(list)
@@ -267,11 +287,12 @@ while True:
     for root, dirs, files in os.walk(OUTPUTDIR):
       existing_structure.append((root,'DIR'))
       for f in files:
-        fullpath = root+sep+f
-        if islink(fullpath):
-          existing_structure.append((fullpath,'LINK', readlink(fullpath)))
-        else:
-          existing_structure.append((fullpath,'FILE'))
+        if not f.startswith('.'):
+          fullpath = root + sep + f
+          if islink(fullpath):
+            existing_structure.append((fullpath,'LINK', readlink(fullpath)))
+          else:
+            existing_structure.append((fullpath,'FILE'))
 
       for f in os.listdir(root):
         if not f.startswith('.') and os.path.isdir(root+sep+f) and os.path.islink(root+sep+f):

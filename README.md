@@ -20,7 +20,7 @@ usage: updatetree.py [-h] [--db [FILE]] [--latency L] [--debug] [--test] dest
 Update directory tree of Zotero attachments.
 
 positional arguments:
-  dest         Ouptut location
+  dest         Output location
 
 optional arguments:
   -h, --help   show this help message and exit
