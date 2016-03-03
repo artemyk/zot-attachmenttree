@@ -58,7 +58,7 @@ def get_itemnames_df(db):
   itemNamesDF['fname'] = itemNamesDF['fname'] + itemNamesDF.publishedDate.apply(lambda x: " - " + x if x is not None else "")
   return itemNamesDF
 
-def get_profile_dir():
+def get_profile_dir(only_standalone=False, only_browser=False):
   import getpass
   import platform
   home = os.path.expanduser("~")
@@ -76,11 +76,17 @@ def get_profile_dir():
   else:
     basepaths = [home+'/.mozilla/firefox/',home+'/.zotero/']
 
-  if os.path.exists(basepaths[0]) and os.path.exists(basepaths[1]):
-    raise Exception('Both standalone and firefox version exists -- not sure which to choose')
+  if only_standalone:
+    searchpaths = [basepaths[1],]
+  elif only_browser:
+    searchpaths = [basepaths[0],]
+  else:
+    searchpaths = basepaths
+    if os.path.exists(basepaths[0]) and os.path.exists(basepaths[1]):
+      raise Exception('Both Firefox (%s) and standalone (%s) version of Zotero exists -- not sure which to choose' % tuple(basepaths))
 
   profiledir = None    
-  for bp in basepaths:
+  for bp in searchpaths:
     cdir = bp + 'Profiles' + sep
     if os.path.exists(cdir):
       for f2 in (f for f in os.listdir(cdir) if not f.startswith('.')):
@@ -102,6 +108,8 @@ def commandline_arg(bytestring):  # Parse unicode
 parser = argparse.ArgumentParser(description='Update directory tree of Zotero attachments.')
 parser.add_argument('dest', type=commandline_arg, help='Output location')
 parser.add_argument('--db', type=commandline_arg, metavar='FILE', nargs='?', help='Location of zotero.sqlite file (automatically determined if not specified)')
+parser.add_argument('--standalone', action='store_true', help='Use zotero.sqlite from standalone Zotero')
+parser.add_argument('--browser', action='store_true', help='Use zotero.sqlite from Firefox-plugin Zotero')
 parser.add_argument('--latency', metavar='L', help='Polling interval in seconds', type=int, default=10)
 parser.add_argument('--debug', help='Output debugging information', action='store_true')
 parser.add_argument('--test', help='Don\'t modify file system, only do simulated test run',  action='store_true')
@@ -115,8 +123,10 @@ if args.debug or args.test:
 # Find Zotero database file
 # ************************************************
 if args.db is None:
+  if args.standalone and args.browser:
+    logging.exception('Both --browser and --standalone options should not be specified')
   try:
-    profiledir = get_profile_dir()
+    profiledir = get_profile_dir(args.standalone, args.browser)
     dbfile = profiledir + 'zotero.sqlite'
     logging.debug(u'Zotero DB found at: %s', dbfile)
   except:
@@ -264,8 +274,10 @@ while True:
           trg_structure.append((OUTPUTDIR+sname, 'FILE'))
         else:
           for ndx, cItemID in enumerate(attlist):
-            sname = sep.join(foldname + [fname + (' (%d)' % (ndx+1) if l > 1 else '') + '.pdf',])
-            lnktarget = profiledir + 'storage' + sep + dfhashkey[cItemID] + sep + attpath[cItemID]
+            #sname = sep.join(foldname + [fname + (' (%d)' % (ndx+1) if l > 1 else '') + '.pdf',])
+            #lnktarget = profiledir + 'storage' + sep + dfhashkey[cItemID] + sep + attpath[cItemID]
+            sname = sep.join(foldname + [fname + (' (%d)' % (ndx+1) if l > 1 else ''),])
+            lnktarget = profiledir + 'storage' + sep + dfhashkey[cItemID]
             trg_structure.append((OUTPUTDIR+sname, 'LINK', lnktarget))
             
     for collId, foldname in foldlist:

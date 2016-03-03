@@ -15,20 +15,25 @@ The following options are available:
 
 ```
 $ python updatetree.py --help
-usage: updatetree.py [-h] [--db [FILE]] [--latency L] [--debug] [--test] dest
+usage: updatetree.py [-h] [--db [FILE]] [--standalone] [--browser]
+                     [--latency L] [--debug] [--test] [--nodaemon]
+                     dest
 
 Update directory tree of Zotero attachments.
 
 positional arguments:
-  dest         Output location
+  dest          Output location
 
 optional arguments:
-  -h, --help   show this help message and exit
-  --db [FILE]  Location of zotero.sqlite file (automatically determined if not
-               specified)
-  --latency L  Polling interval in seconds
-  --debug      Output debugging information
-  --test       Don't modify file system, only do simulated test run
+  -h, --help    show this help message and exit
+  --db [FILE]   Location of zotero.sqlite file (automatically determined if
+                not specified)
+  --standalone  Use zotero.sqlite from standalone Zotero
+  --browser     Use zotero.sqlite from Firefox-plugin Zotero
+  --latency L   Polling interval in seconds
+  --debug       Output debugging information
+  --test        Don't modify file system, only do simulated test run
+  --nodaemon    Run once and exit.
 ```
 
 Example usage:
