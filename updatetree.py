@@ -210,7 +210,7 @@ while True:
                 ndx = 1
                 basedir = sep.join(basefold[:]) + sep
                 while True:
-                  cfoldname = scrubfilename(cname) + ("" if ndx == 1 else " (%d)" % ndx)
+                  cfoldname = "+" + scrubfilename(cname) + ("" if ndx == 1 else " (%d)" % ndx)
                   if basedir + cfoldname not in existing_folder_names:
                     existing_folder_names.add(basedir + cfoldname)
                     break
@@ -278,7 +278,7 @@ while True:
             #lnktarget = profiledir + 'storage' + sep + dfhashkey[cItemID] + sep + attpath[cItemID]
             sname = sep.join(foldname + [fname + (' (%d)' % (ndx+1) if l > 1 else ''),])
             lnktarget = profiledir + 'storage' + sep + dfhashkey[cItemID]
-            trg_structure.append((OUTPUTDIR+sname, 'LINK', lnktarget))
+            trg_structure.append((OUTPUTDIR+sname, 'DIRLINK', lnktarget))
             
     for collId, foldname in foldlist:
       try:
@@ -288,7 +288,7 @@ while True:
         itemlist = []
       addsymlinks(foldname, itemlist)
 
-    addsymlinks(['Unfiled',], itemNamesDF[itemNamesDF.incollection==False].index.values)
+    addsymlinks(['+Unfiled',], itemNamesDF[itemNamesDF.incollection==False].index.values)
 
     # ****************************
     # Update destination directory
@@ -308,11 +308,12 @@ while True:
 
       for f in os.listdir(root):
         if not f.startswith('.') and os.path.isdir(root+sep+f) and os.path.islink(root+sep+f):
-          existing_structure.append((root+sep+f,'DIRLINK'))
+          fullpath = root + sep + f
+          existing_structure.append((root+sep+f,'DIRLINK', readlink(fullpath)))
 
     trg_structure_set = set(trg_structure)
     existing_structure_set = set(existing_structure)
-    
+
     def objname(o):
       if o[1] == 'LINK':
         return 'LINK ' + o[0] + " (" + o[2] + ")"
@@ -339,7 +340,7 @@ while True:
             elif f[1] == 'FILE':
               with open(f[0], "w") as fhandle:
                   fhandle.write("")
-            elif f[1] == 'LINK':
+            elif f[1] == 'LINK' or f[1] == 'DIRLINK':
               os.symlink(f[2], f[0])
             else:
               raise Exception(u"Don''t know how to create this type!")
