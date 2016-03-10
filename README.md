@@ -11,7 +11,14 @@ Not tested on Unix platforms.  Windows not currently supported due to symlinks, 
 
 # Command-line usage
 
-The following options are available:
+Example usage:
+```
+python updatetree.py --debug ~/Dropbox/ZoteroPDFs/
+```
+will create a directory structure with your Zotero PDFs in `~/Dropbox/ZoteroPDFs/`.
+
+
+More generally, the following options are available:
 
 ```
 $ python updatetree.py --help
@@ -34,11 +41,6 @@ optional arguments:
   --debug       Output debugging information
   --test        Don't modify file system, only do simulated test run
   --nodaemon    Run once and exit.
-```
-
-Example usage:
-```
-python updatetree.py --debug ~/Dropbox/ZoteroPDFs/
 ```
 
 # Requirements
