@@ -4,7 +4,7 @@ This is a Python script to create a hierarchical directory tree containing Zoter
 Each directory corresponds to a Zotero collection (items in more than one collection are duplicated).  
 The files in the directories are symbolic links to attachments stored in the Zotero storage directory.
 
-This directory can then be put on a cloud storage provider and synchornized to a tablet device, using apps like [Documents by Readle](https://readdle.com/products/documents) for the Ipad or [AutoSync Dropbox](https://play.google.com/store/apps/details?id=com.ttxapps.dropsync&hl=en) for Android.   Because files are symlinks to original PDFs, changes will propagate back to the attachments in Zotero.
+This directory can then be put on a cloud storage provider and synchronized to a tablet device, using apps like [Documents by Readle](https://readdle.com/products/documents) for the Ipad or [AutoSync Dropbox](https://play.google.com/store/apps/details?id=com.ttxapps.dropsync&hl=en) for Android.   Because files are symlinks to original PDFs, changes in the Dropbox directory (e.g. highlighting or adding notes on your tablet) will propagate back to the attachments in Zotero.
 
 Not tested on Unix platforms.  Windows not currently supported due to symlinks, pull requests welcome.
 

@@ -1,6 +1,3 @@
-from tendo import singleton
-me = singleton.SingleInstance()
-
 import os, tempfile, shutil, sys, time
 import numpy as np
 import pandas as pd
@@ -107,7 +104,8 @@ def commandline_arg(bytestring):  # Parse unicode
   return unicode_string
 parser = argparse.ArgumentParser(description='Update directory tree of Zotero attachments.')
 parser.add_argument('dest', type=commandline_arg, help='Output location')
-parser.add_argument('--db', type=commandline_arg, metavar='FILE', nargs='?', help='Location of zotero.sqlite file (automatically determined if not specified)')
+parser.add_argument('--db', type=commandline_arg, metavar='FILE', nargs='?', 
+  help='Location of zotero.sqlite file (try to automatically determine if not specified)')
 parser.add_argument('--standalone', action='store_true', help='Use zotero.sqlite from standalone Zotero')
 parser.add_argument('--browser', action='store_true', help='Use zotero.sqlite from Firefox-plugin Zotero')
 parser.add_argument('--latency', metavar='L', help='Polling interval in seconds', type=int, default=10)
@@ -115,6 +113,9 @@ parser.add_argument('--debug', help='Output debugging information', action='stor
 parser.add_argument('--test', help='Don\'t modify file system, only do simulated test run',  action='store_true')
 parser.add_argument('--nodaemon', help='Run once and exit.', action='store_true')
 args = parser.parse_args()
+
+from tendo import singleton
+me = singleton.SingleInstance()
 
 if args.debug or args.test:
   logger.setLevel(logging.DEBUG)
