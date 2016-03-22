@@ -263,8 +263,9 @@ while True:
     dfhashkey = pd.read_sql("select itemID, key from items", db, index_col="itemID").key.to_dict()
 
     trg_structure = [(OUTPUTDIR,'DIR'),]
+    trg_dirs = set()
     def addsymlinks(foldname, itemslist):
-      global trg_structure
+      global trg_structure, trg_dirs
       trg_structure.append((OUTPUTDIR+sep.join(foldname), "DIR"))
       for sourceItemID in itemslist:
         fname = scrubfilename(namedict[sourceItemID])
@@ -277,9 +278,15 @@ while True:
           for ndx, cItemID in enumerate(attlist):
             #sname = sep.join(foldname + [fname + (' (%d)' % (ndx+1) if l > 1 else '') + '.pdf',])
             #lnktarget = profiledir + 'storage' + sep + dfhashkey[cItemID] + sep + attpath[cItemID]
-            sname = sep.join(foldname + [fname + (' (%d)' % (ndx+1) if l > 1 else ''),])
             lnktarget = profiledir + 'storage' + sep + dfhashkey[cItemID]
+            sfxnum = 1
+            while True:
+              sname = sep.join(foldname + [fname + (' (%d)' % sfxnum if sfxnum > 1 else ''),])
+              if sname not in trg_dirs:
+                break
+              sfxnum += 1
             trg_structure.append((OUTPUTDIR+sname, 'DIRLINK', lnktarget))
+            trg_dirs.add(sname)
             
     for collId, foldname in foldlist:
       try:
