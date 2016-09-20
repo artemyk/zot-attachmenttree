@@ -47,8 +47,8 @@ def get_itemnames_df(db):
   itemNamesDF=pd.read_sql(sql, db, index_col='itemID')
 
   itemNamesDF['fname'] = \
-      itemNamesDF.authorfirst.apply(lambda x: "".join(map(lambda y: y[0] if len(y) else "", x.split(" "))) + " " if x is not None else "") + \
-      itemNamesDF.authorlast.apply(lambda x: x.strip() if x is not None else "")
+      itemNamesDF.authorlast.apply(lambda x: x.strip() if x is not None else "NOLAST") + " " + \
+      itemNamesDF.authorfirst.apply(lambda x: "".join(map(lambda y: y[0] if len(y) else "", x.split(" "))) if x is not None else "")
   itemNamesDF['fname'] = itemNamesDF.fname.apply(lambda x: x + ' - ' if x != "" else '')
   itemNamesDF['fname'] = itemNamesDF['fname'] + itemNamesDF.title.apply(lambda x: x[0:70] if x is not None and x != "" else "NOTITLE")
   itemNamesDF['fname'] = itemNamesDF['fname'] + itemNamesDF.journal.apply(lambda x: " - " + x if x is not None else "")
