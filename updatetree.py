@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os, tempfile, shutil, sys, time
 import numpy as np
 import pandas as pd
@@ -6,13 +7,23 @@ import logging
 logger = logging.getLogger()
 sep = os.path.sep
 
-# Function to convert string into a safe filename
-import unicodedata, re, string
-validFilenameChars = "-_.() %s%s" % (string.ascii_letters, string.digits)
-validRE = re.compile("[^%s]" % validFilenameChars)
+import unicodedata
 def scrubfilename(filename):
-  cleanedFilename = unicodedata.normalize('NFKD', unicode(filename)).encode('ASCII', 'ignore')
-  return validRE.sub(' ', cleanedFilename).strip()
+  # Function to convert string into a safe filename
+  # Remove diacritics and leave only allowed characters 
+  # Supports unicode
+  keepcharacters = "-_.() '"
+  s = u""
+  for c in unicodedata.normalize('NFD', filename):
+    if unicodedata.category(c) == 'Mn':
+      continue
+    if c.isalnum() or c in keepcharacters:
+      s += c
+    elif c == u'’':
+      s += "'"
+    else:
+      s += " "
+  return s.rstrip()
 
 # Function to get dataframe with item names
 def get_itemnames_df(db):
