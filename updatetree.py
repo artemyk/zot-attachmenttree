@@ -25,12 +25,24 @@ def scrubfilename(filename):
       s += " "
   return s.rstrip()
 
+def is_zotero_version5(db):
+    version = pd.read_sql( "select version from version where schema='userdata'", db).version[0]
+    
+    return version >= 90
+
 # Function to get dataframe with item names
 def get_itemnames_df(db):
+  if is_zotero_version5(db):
+    joins = "left join creators as cData on cData.creatorID=itemCreators.creatorID"
+  else:
+    joins = """
+    left join creators on creators.creatorID=itemCreators.creatorID 
+    left join creatorData as cData on creatorData.creatorDataID=creators.creatorDataID
+    """
   sql = """
   select items.itemID,
-    creatorData.firstName as authorfirst, 
-    creatorData.lastName as authorlast, 
+    cData.firstName as authorfirst, 
+    cData.lastName as authorlast, 
     SUBSTR(dateDV.value,1,4) as publishedDate,
     titleDV.value as title,
     pubDV.value as journal
@@ -40,9 +52,7 @@ def get_itemnames_df(db):
          select itemID, min(orderIndex) as minOrderIndex from itemCreators group by itemID
       ) AS firstCreatorIndex ON firstCreatorIndex.itemID = items.itemID 
     left join itemCreators on itemCreators.itemID=items.itemID and itemCreators.orderIndex=firstCreatorIndex.minOrderIndex
-    left join creators     on creators.creatorID=itemCreators.creatorID 
-    left join creatorData  on creatorData.creatorDataID=creators.creatorDataID      
-    
+    """+joins+"""
     left join itemData dateD         on (dateD.itemID=items.itemID and dateD.fieldID=14) 
     left join itemDataValues dateDV  on dateDV.valueID=dateD.valueID
     left join itemData titleD         on (titleD.itemID=items.itemID and titleD.fieldID=110) 
@@ -55,6 +65,7 @@ def get_itemnames_df(db):
   deleted.itemID IS NULL AND 
   items.itemTypeID != 1 and items.itemTypeID != 14 -- don't want attachments or notes
   """
+
   itemNamesDF=pd.read_sql(sql, db, index_col='itemID')
 
   itemNamesDF['fname'] = \
@@ -67,41 +78,48 @@ def get_itemnames_df(db):
   return itemNamesDF
 
 def get_profile_dir(only_standalone=False, only_browser=False):
-  import getpass
   import platform
   home = os.path.expanduser("~")
+
+  def expdir(cdir):
+    if cdir[-1] != sep:
+      cdir += sep
+    return [cdir + f for f in os.listdir(cdir) if not f.startswith('.')]
+
   if platform.system() == 'Darwin':
-    basepaths = [home+u'/Library/Application Support/Firefox/',home+u'/Library/Application Support/Zotero/']
+    browserpaths    = expdir(home+u'/Library/Application Support/Firefox/Profiles/')
+    standalonepaths = expdir(home+u'/Library/Application Support/Zotero/Profiles/') + [home+u'/Zotero/']
   elif platform.system() == 'Windows':
     raise Exception("Windows not supported due to symlinks")
     #if map(int, platform.version().split("."))[0] >= 6:
-    #    basepaths = [home+u'\\AppData\\Roaming\\Mozilla\\Firefox\\', 
-    #                 home+u'\\AppData\\Roaming\\Zotero\\Zotero\\']
+    #    browserpaths = expdir(home+u'\\AppData\\Roaming\\Mozilla\\Firefox\\')
+    #    standalonepaths = expdir(home+u'\\AppData\\Roaming\\Zotero\\Zotero\\')
     #else:
+    #    import getpass
     #    user = getpass.getuser()
-    #    basepaths = [u'C:\\Documents and Settings\\%s\\Application Data\\Mozilla\\Firefox\\'%user,
-    #                 u'C:\\Documents and Settings\\%s\\Application Data\\Zotero\\'%user]
+    #    browserpaths = expdir(u'C:\\Documents and Settings\\%s\\Application Data\\Mozilla\\Firefox\\Profiles\\'%user)
+    #    standalonepaths = expdir(u'C:\\Documents and Settings\\%s\\Application Data\\Zotero\\Profiles\\'%user)
   else:
-    basepaths = [home+'/.mozilla/firefox/',home+'/.zotero/']
+    browserpaths = expdir(home+'/.mozilla/firefox/Profiles/')
+    standalonepaths = expdir(home+'/.zotero/Profiles/')
 
   if only_standalone:
-    searchpaths = [basepaths[1],]
+    searchpaths = standalonepaths
   elif only_browser:
-    searchpaths = [basepaths[0],]
+    searchpaths = browserpaths
   else:
-    searchpaths = basepaths
-    if os.path.exists(basepaths[0]) and os.path.exists(basepaths[1]):
+    searchpaths = standalonepaths + browserpaths
+    if any( os.path.exists(p) for p in browserpaths ) and \
+       any( os.path.exists(p) for p in standalonepaths ):
       raise Exception('Both Firefox (%s) and standalone (%s) version of Zotero exists -- not sure which to choose' % tuple(basepaths))
 
   profiledir = None    
   for bp in searchpaths:
-    cdir = bp + 'Profiles' + sep
-    if os.path.exists(cdir):
-      for f2 in (f for f in os.listdir(cdir) if not f.startswith('.')):
-        if profiledir is None:
-          profiledir = cdir + f2 + os.path.sep + 'zotero' + os.path.sep
-        else:
-          raise Exception('Duplicate profiles found')
+    if os.path.exists(bp) and os.path.isfile(bp + 'zotero.sqlite'):
+      if profiledir is None:
+        profiledir = bp
+      else:
+        raise Exception('Duplicate profiles found')
 
   return profiledir
 
@@ -155,12 +173,13 @@ except:
   logging.exception("Error making temporary directory")
   sys.exit()
 
-tempdb = tmppath + 'zotero.sqlite'
-
 # ************************************************
 # Determine output directory
 # ************************************************
 OUTPUTDIR = os.path.expanduser(args.dest)
+if OUTPUTDIR[-1] != sep:
+  OUTPUTDIR += sep
+
 logging.debug("Saving to destination folder: %s", OUTPUTDIR)
 
 last_modtime = 0
@@ -168,6 +187,9 @@ last_modtime = 0
 # ************************************************
 # Begin polling loop
 # ************************************************
+
+tempdb = tmppath + 'zotero.sqlite'
+
 while True:
 
   if last_modtime != 0:  # dont sleep the first time around
@@ -252,22 +274,30 @@ while True:
     df['itemID'] = df['itemID'].astype('int')
     itemNamesDF.loc[df.itemID, 'incollection'] = True
 
+    if is_zotero_version5(db):
+      # Zotero 5.0
+      parentItemIdCol = 'parentItemId'
+      mimeTypeCol     = 'contentType'
+    else:
+      parentItemIdCol = 'sourceItemId'
+      mimeTypeCol     = 'mimeType'
+
     dfatt = pd.read_sql("""
-                        select sourceItemID, itemAttachments.itemID, path 
+                        select """+parentItemIdCol+""" as parentItemId, itemAttachments.itemID, path 
                         from itemAttachments 
                         left join deletedItems deleted on itemAttachments.itemID = deleted.itemID
-                        left join deletedItems deleted2 on itemAttachments.sourceItemID = deleted2.itemID
+                        left join deletedItems deleted2 on itemAttachments."""+parentItemIdCol+""" = deleted2.itemID
                         where 
                           deleted.itemID IS NULL AND 
-                          mimeType='application/pdf' and 
+                          """+mimeTypeCol+"""='application/pdf' and 
                           path like 'storage:%' and
-                          sourceItemId is not null
+                          """+parentItemIdCol+""" is not null
                         order by itemAttachments.itemID
                         """, 
                         db)
     itemAtts = defaultdict(list)
     attpath = {}
-    for sId, iId, cPath in zip(dfatt.sourceItemID, dfatt.itemID, dfatt.path):
+    for sId, iId, cPath in zip(dfatt.parentItemId, dfatt.itemID, dfatt.path):
       itemAtts[int(sId)].append(int(iId))
       attpath[iId] = cPath[8:]
         
