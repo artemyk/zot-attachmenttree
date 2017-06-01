@@ -138,7 +138,7 @@ parser.add_argument('--db', type=commandline_arg, metavar='FILE', nargs='?',
 parser.add_argument('--standalone', action='store_true', help='Use zotero.sqlite from standalone Zotero')
 parser.add_argument('--browser', action='store_true', help='Use zotero.sqlite from Firefox-plugin Zotero')
 parser.add_argument('--latency', metavar='L', help='Polling interval in seconds', type=int, default=10)
-parser.add_argument('--debug', help='Output debugging information', action='store_true')
+parser.add_argument('--verbose', help='Verbosity level of debugging information', type=int, default=0, choices=[0,1])
 parser.add_argument('--test', help='Don\'t modify file system, only do simulated test run',  action='store_true')
 parser.add_argument('--nodaemon', help='Run once and exit.', action='store_true')
 args = parser.parse_args()
@@ -146,8 +146,10 @@ args = parser.parse_args()
 from tendo import singleton
 me = singleton.SingleInstance()
 
-if args.debug or args.test:
-  logger.setLevel(logging.DEBUG)
+if args.verbose == 1 or args.test:
+  logger.setLevel(logging.INFO)
+#if args.verbose == 2:
+#  logger.setLevel(logging.DEBUG)
 
 # ************************************************
 # Find Zotero database file
@@ -158,14 +160,14 @@ if args.db is None:
   try:
     profiledir = get_profile_dir(args.standalone, args.browser)
     dbfile = profiledir + 'zotero.sqlite'
-    logging.debug(u'Zotero DB found at: %s', dbfile)
+    logging.info(u'Zotero DB found at: %s', dbfile)
   except:
     logging.exception("Error finding Zotero profile directory")
     sys.exit()
 else:
   dbfile = args.db
   profiledir = os.path.dirname(dbfile) + sep
-  logging.debug(u"Zotero DB specified at %s", dbfile)
+  logging.info(u"Zotero DB specified at %s", dbfile)
 
 try:
   tmppath = tempfile.mkdtemp()
@@ -180,14 +182,14 @@ OUTPUTDIR = os.path.expanduser(args.dest)
 if OUTPUTDIR[-1] != sep:
   OUTPUTDIR += sep
 
-logging.debug("Saving to destination folder: %s", OUTPUTDIR)
+logging.info("Saving to destination folder: %s", OUTPUTDIR)
 
 last_modtime = 0
 
 # ************************************************
 # Begin polling loop
 # ************************************************
-
+ROOT_COLLECTION_ID = -1000
 tempdb = tmppath + 'zotero.sqlite'
 
 while True:
@@ -203,9 +205,9 @@ while True:
     continue
 
   if last_modtime == 0:
-    logging.debug("Running startup sync")
+    logging.info("Running startup sync")
   else:
-    logging.debug("Database modification detected")
+    logging.info("Database modification detected")
 
   start_time = time.time()
   last_modtime = cur_modtime
@@ -234,12 +236,12 @@ while True:
 
     foldlist = []
     existing_folder_names = set()
-    def get_collection_tree(df, basefold, parentCollectionId = np.nan):
+    def get_collection_tree(df, basefold, parentCollectionId):
         global foldlist, existing_folder_names
-        if not np.isnan( parentCollectionId ): 
-          foldlist.append((parentCollectionId,basefold))
+        if parentCollectionId != ROOT_COLLECTION_ID:
+            foldlist.append((parentCollectionId,basefold))
         try:
-            cdf = df.ix[parentCollectionId]
+            cdf = df.loc[[parentCollectionId]]
             for cid, cname in zip(cdf.collectionID, cdf.collectionName):
                 ndx = 1
                 basedir = sep.join(basefold[:]) + sep
@@ -252,11 +254,16 @@ while True:
 
                 cfold = basefold[:] + [cfoldname,]
                 get_collection_tree(df, cfold, cid)
-        except:
+        except KeyError:
             #no children
             pass
-    df = pd.read_sql( "select parentCollectionID, collectionID, collectionName from collections", db, index_col="parentCollectionID")
-    get_collection_tree(df, [])
+            
+    df = pd.read_sql("""
+        select ifnull(parentCollectionID, %d) as parentCollectionID, 
+          collectionID, 
+          collectionName 
+          from collections""" % ROOT_COLLECTION_ID, db, index_col="parentCollectionID")
+    get_collection_tree(df, [], ROOT_COLLECTION_ID)
 
 
     # ******************************************************
@@ -373,7 +380,7 @@ while True:
     for f in existing_structure[::-1]: 
       # iterate backward so that deeper down directories are deleted first
       if f not in trg_structure_set:
-        logging.debug(u"Deleting %s", objname(f))
+        logging.info(u"Deleting %s", objname(f))
         if not args.test:
           if f[1] == 'DIR':
             shutil.rmtree(f[0])
@@ -382,7 +389,7 @@ while True:
 
     for f in trg_structure:
       if f not in existing_structure_set:
-        logging.debug(u"Making %s", objname(f))
+        logging.info(u"Making %s", objname(f))
         if not args.test:
           try:
             if f[1] == 'DIR':
@@ -414,12 +421,12 @@ while True:
     except:
       pass
 
-  logging.debug("Executed in %0.3fs", time.time() - start_time)
+  logging.info("Executed in %0.3fs", time.time() - start_time)
 
   if args.nodaemon:
     break
 
-logging.debug("Removing temporary directory")
+logging.info("Removing temporary directory")
 try:
   shutil.rmtree(tmppath)
 except:
