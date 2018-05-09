@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import print_function
 import os, tempfile, shutil, sys, time
 import numpy as np
 import pandas as pd
@@ -84,7 +85,10 @@ def get_profile_dir(only_standalone=False, only_browser=False):
   def expdir(cdir):
     if cdir[-1] != sep:
       cdir += sep
-    return [cdir + f for f in os.listdir(cdir) if not f.startswith('.')]
+    if not os.path.exists(cdir):
+      return []
+    else:
+      return [cdir + f for f in os.listdir(cdir) if not f.startswith('.')]
 
   if platform.system() == 'Darwin':
     browserpaths    = expdir(home+u'/Library/Application Support/Firefox/Profiles/')
@@ -129,7 +133,10 @@ def get_profile_dir(only_standalone=False, only_browser=False):
 # ************************************************
 import argparse
 def commandline_arg(bytestring):  # Parse unicode
-  unicode_string = bytestring.decode(sys.getfilesystemencoding())
+  if sys.version_info >= (3, 0):
+    unicode_string = bytestring
+  else:
+    unicode_string = bytestring.decode(sys.getfilesystemencoding())
   return unicode_string
 parser = argparse.ArgumentParser(description='Update directory tree of Zotero attachments.')
 parser.add_argument('dest', type=commandline_arg, help='Output location')
