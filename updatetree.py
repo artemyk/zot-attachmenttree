@@ -366,7 +366,7 @@ while True:
         if not f.startswith('.'):
           fullpath = root + sep + f
           if islink(fullpath):
-            existing_structure.append((fullpath,'LINK', readlink(fullpath)))
+            existing_structure.append((fullpath, 'LINK', readlink(fullpath)))
           else:
             existing_structure.append((fullpath,'FILE'))
 
@@ -379,8 +379,8 @@ while True:
     existing_structure_set = set(existing_structure)
 
     def objname(o):
-      if o[1] == 'LINK':
-        return 'LINK ' + o[0] + " (" + o[2] + ")"
+      if o[1] == 'LINK' or o[1] == 'DIRLINK':
+        return o[1] + ' ' + o[0] + " (" + o[2] + ")"
       else:
         return o[1] + ' ' + o[0]
 
