@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import print_function
-import os, tempfile, shutil, sys, time
+import os, tempfile, shutil, sys, time, datetime
+import psutil
 import numpy as np
 import pandas as pd
 from collections import defaultdict
@@ -78,6 +79,25 @@ def get_itemnames_df(db):
   itemNamesDF['fname'] = itemNamesDF['fname'] + itemNamesDF.publishedDate.apply(lambda x: " - " + x if x is not None else "")
   return itemNamesDF
 
+def is_zotero_running(is_standalone):
+  for pid in psutil.pids():
+      p = psutil.Process(pid)
+      try:
+        pname = p.name()
+        if pname.endswith('.exe'):
+          pname = pname[:-4]
+
+        if is_standalone and pname == "zotero":
+          return True
+
+        elif not is_standalone and pname == "firefox":
+          return True
+
+      except:
+        pass
+
+  return False
+
 def get_profile_dir(only_standalone=False, only_browser=False):
   import platform
   home = os.path.expanduser("~")
@@ -117,15 +137,23 @@ def get_profile_dir(only_standalone=False, only_browser=False):
        any( os.path.exists(p) for p in standalonepaths ):
       raise Exception('Both Firefox (%s) and standalone (%s) version of Zotero exists -- not sure which to choose' % tuple(basepaths))
 
-  profiledir = None    
+  profiledir = None 
+  is_standalone = None  
   for bp in searchpaths:
     if os.path.exists(bp) and os.path.isfile(bp + 'zotero.sqlite'):
       if profiledir is None:
         profiledir = bp
+        if bp in standalonepaths:
+          is_standalone = True
+        elif bp in browserpaths:
+          is_standalone = False
+        else:
+          raise Exception('Path %s not in standalonepaths or browserpaths' % bp)
+
       else:
         raise Exception('Duplicate profiles found')
 
-  return profiledir
+  return profiledir, is_standalone
 
 
 # ************************************************
@@ -157,6 +185,9 @@ if args.verbose == 1 or args.test:
   logger.setLevel(logging.INFO)
 #if args.verbose == 2:
 #  logger.setLevel(logging.DEBUG)
+if args.test:
+  logging.info('Running in test mode (no modifications will be made)')
+
 
 # ************************************************
 # Find Zotero database file
@@ -165,7 +196,7 @@ if args.db is None:
   if args.standalone and args.browser:
     logging.exception('Both --browser and --standalone options should not be specified')
   try:
-    profiledir = get_profile_dir(args.standalone, args.browser)
+    profiledir, is_standalone = get_profile_dir(args.standalone, args.browser)
     dbfile = profiledir + 'zotero.sqlite'
     logging.info(u'Zotero DB found at: %s', dbfile)
   except:
@@ -174,6 +205,7 @@ if args.db is None:
 else:
   dbfile = args.db
   profiledir = os.path.dirname(dbfile) + sep
+  is_standalone = 'firefox' in profiledir.lower()
   logging.info(u"Zotero DB specified at %s", dbfile)
 
 try:
@@ -214,10 +246,15 @@ while True:
   if last_modtime == 0:
     logging.info("Running startup sync")
   else:
-    logging.info("Database modification detected")
+    ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    logging.info("Database modification detected (%s)" % ctime)
 
   start_time = time.time()
   last_modtime = cur_modtime
+
+  if not is_zotero_running(is_standalone):
+    logging.error("Zotero not running!")
+    continue
 
   # ************************************************
   # Create copy of database and connect to it
@@ -341,8 +378,12 @@ while True:
                 break
               sfxnum += 1
 
-            trg_structure.append((OUTPUTDIR+sname, 'DIRLINK', lnktarget))
-            trg_dirs_lower.add(sname.lower())
+            if not os.path.exists(lnktarget):
+              logging.warning("ERROR: Link to non-existent directory: %s -> %s" % (sname, lnktarget) )
+
+            else:
+              trg_structure.append((OUTPUTDIR+sname, 'DIRLINK', lnktarget))
+              trg_dirs_lower.add(sname.lower())
             
     for collId, foldname in foldlist:
       try:
@@ -371,8 +412,8 @@ while True:
             existing_structure.append((fullpath,'FILE'))
 
       for f in os.listdir(root):
-        if not f.startswith('.') and os.path.isdir(root+sep+f) and os.path.islink(root+sep+f):
-          fullpath = root + sep + f
+        fullpath = root + sep + f
+        if not f.startswith('.') and os.path.isdir(fullpath) and os.path.islink(fullpath):
           existing_structure.append((root+sep+f,'DIRLINK', readlink(fullpath)))
 
     trg_structure_set = set(trg_structure)
