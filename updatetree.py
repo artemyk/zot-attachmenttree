@@ -81,8 +81,8 @@ def get_itemnames_df(db):
 
 def is_zotero_running(is_standalone):
   for pid in psutil.pids():
-      p = psutil.Process(pid)
       try:
+        p = psutil.Process(pid)
         pname = p.name()
         if pname.endswith('.exe'):
           pname = pname[:-4]
