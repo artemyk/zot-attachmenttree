@@ -35,12 +35,13 @@ def is_zotero_version5(db):
 # Function to get dataframe with item names
 def get_itemnames_df(db):
   if is_zotero_version5(db):
-    joins = "left join creators as cData on cData.creatorID=itemCreators.creatorID"
+    joins = "left join creators as cData on cData.creatorID=firstCreator.creatorID"
   else:
     joins = """
-    left join creators on creators.creatorID=itemCreators.creatorID 
+    left join creators on creators.creatorID=firstCreator.creatorID 
     left join creatorData as cData on creatorData.creatorDataID=creators.creatorDataID
     """
+    
   sql = """
   select items.itemID,
     cData.firstName as authorfirst, 
@@ -51,9 +52,10 @@ def get_itemnames_df(db):
     
   from items
     left join (
-         select itemID, min(orderIndex) as minOrderIndex from itemCreators group by itemID
-      ) AS firstCreatorIndex ON firstCreatorIndex.itemID = items.itemID 
-    left join itemCreators on itemCreators.itemID=items.itemID and itemCreators.orderIndex=firstCreatorIndex.minOrderIndex
+         select itemID, creatorID, min(100000*creatorTypeID + orderIndex)
+         from itemCreators 
+         group by itemID
+      ) AS firstCreator ON firstCreator.itemID = items.itemID 
     """+joins+"""
     left join itemData dateD         on (dateD.itemID=items.itemID and dateD.fieldID=14) 
     left join itemDataValues dateDV  on dateDV.valueID=dateD.valueID
@@ -432,8 +434,13 @@ while True:
         if not args.test:
           if f[1] == 'DIR':
             shutil.rmtree(f[0])
-          else:
+          elif f[1] == 'DIRLINK':
             os.remove(f[0])
+          elif f[0].endswith(' NOPDF'):
+            os.remove(f[0])
+          else:
+            logging.warning(u"*** SKIPPING FILE DELETION: %s [%s] ***", f[0], f[1])
+            #os.remove(f[0])
 
     for f in trg_structure:
       if f not in existing_structure_set:
